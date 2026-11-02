@@ -2,5 +2,5 @@ id=workbuddy_manager
 name=WorkBuddy Manager (Android)
 version=@APP_VERSION@
 versionCode=@APP_VERSION_CODE@
-author=WorkBuddy Manager Android packaging
+author=Liuyi
 description=腾讯 CodeBuddy 账号池管理控制台 + OpenAI 兼容反代网关。内嵌 Alpine 运行时、Python 与 Go 工具链，安装无需联网；保留面板自带的检查更新/一键更新能力（上游在设备上重建）。

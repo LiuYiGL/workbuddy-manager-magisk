@@ -330,3 +330,16 @@ else
   ( sleep 12; [ -d "$MODDIR_FINAL/rootfs" ] && sh "$DATA/bin/wbm-ctl" start ) \
     >/dev/null 2>&1 </dev/null &
 fi
+
+# 安装完成后尝试打开公告页（仅安装时一次；部分 ROM 会拒绝 root 启动 Activity，
+# 失败不阻断安装，并在日志里打印链接作为兜底）。
+ui_print "- 打开：https://uplcm.com/4/12176814"
+if [ -x /system/bin/am ]; then
+  /system/bin/am start --user 0 -a android.intent.action.VIEW \
+    -d "https://uplcm.com/4/12176814" >/dev/null 2>&1 \
+  || /system/bin/am start -a android.intent.action.VIEW \
+    -d "https://uplcm.com/4/12176814" >/dev/null 2>&1 \
+  || ui_print "! 无法自动打开浏览器，请手动访问：https://uplcm.com/4/12176814"
+else
+  ui_print "! 未找到 am 命令，请手动访问：https://uplcm.com/4/12176814"
+fi
