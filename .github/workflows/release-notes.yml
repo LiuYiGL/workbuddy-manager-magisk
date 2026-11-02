@@ -1,0 +1,32 @@
+name: Update release notes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release-notes.md'
+      - '.github/workflows/release-notes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve latest tag
+        id: tag
+        run: echo "tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
+      - name: Update release body
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: WorkBuddy Manager ${{ steps.tag.outputs.tag }} · Android Magisk/KernelSU 模块
+          body_path: release-notes.md
