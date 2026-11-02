@@ -103,7 +103,11 @@ fi
 if [ ! -x "$ROOTFS/opt/wbm/bin/start-manager" ]; then
   chmod -R 755 "$ROOTFS/opt/wbm/bin" "$ROOTFS/usr/local/bin" 2>/dev/null
 fi
-[ -x "$ROOTFS/bin/sh" ] || abort "rootfs 不完整（缺少 /bin/sh）"
+# 注意：rootfs 里的 /bin/sh 是指向 /bin/busybox 的绝对符号链接。
+# 在宿主机上用 -x/-e 检查会跟随到宿主机的 /bin/busybox（Android 上没有），
+# 从而误判“rootfs 不完整”。这里检查真实 target 与链接本身。
+[ -f "$ROOTFS/bin/busybox" ] || abort "rootfs 不完整（缺少 /bin/busybox）"
+[ -L "$ROOTFS/bin/sh" ] || [ -f "$ROOTFS/bin/sh" ] || abort "rootfs 不完整（缺少 /bin/sh）"
 chmod 1777 "$ROOTFS/tmp" 2>/dev/null || true
 # 防御：docker export 可能带上 /.dockerenv。它会让 update.py 的自动探测
 # 误判为“容器内部”（进而尝试 kill PID 1 = Android init）。我们显式设置了

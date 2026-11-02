@@ -1,5 +1,8 @@
 #!/bin/sh
-# 设备内健康检查（在 chroot 内执行）。退出码 0 = 两个服务都在响应。
+# 设备内健康检查（在 chroot 内执行）。
+# 判据是“端口有没有 HTTP 响应”，不是 HTTP 200：
+#   · 上游 /healthz 在没有可用账号时返回 503 —— 服务本身是活的；
+#   · 管理端刚启动的几秒内可能还没 bind，所以短暂重试。
 set -u
 . /opt/wbm/bin/wbm-env.sh
 
@@ -8,14 +11,31 @@ port=$(sed -n 's/^[[:space:]]*WB_MANAGER_PORT[[:space:]]*=[[:space:]]*//p' \
 [ -n "$port" ] || port=7864
 
 ok=0
-if /usr/bin/curl -fsS --max-time 3 http://127.0.0.1:7863/healthz >/dev/null 2>&1; then
-  echo "upstream   : ok"
-else
-  echo "upstream   : FAIL"; ok=1
-fi
-if /usr/bin/curl -fsS --max-time 3 "http://127.0.0.1:$port/api/healthz" >/dev/null 2>&1; then
-  echo "manager    : ok"
-else
-  echo "manager    : FAIL"; ok=1
-fi
+
+check() {
+  name=$1
+  url=$2
+  i=0
+  code=000
+  while [ "$i" -lt 5 ]; do
+    code=$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$url" 2>/dev/null)
+    [ -n "$code" ] || code=000
+    [ "$code" = 000 ] || break
+    i=$((i + 1))
+    sleep 1
+  done
+  case "$code" in
+    000|'')
+      echo "$name: FAIL"
+      ok=1
+      ;;
+    *)
+      echo "$name: ok (HTTP $code)"
+      ;;
+  esac
+}
+
+check "upstream" "http://127.0.0.1:7863/healthz"
+check "manager " "http://127.0.0.1:$port/api/healthz"
+
 exit "$ok"
