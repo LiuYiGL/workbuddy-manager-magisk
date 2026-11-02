@@ -1,0 +1,233 @@
+#!/system/bin/sh
+# WorkBuddy Manager（Android）命令行管理工具。
+#
+#   wbm-ctl start|stop|restart|status|logs [n] [target]|password|shell|doctor
+#   wbm-ctl rebuild-upstream      # 设备上手动重建上游
+#
+# 安装后可直接在 adb shell / Termux(su) 中运行：
+#   sh /data/adb/workbuddy-manager/bin/wbm-ctl status
+set -u
+
+SELF_DIR=${0%/*}
+[ "$SELF_DIR" = "$0" ] && SELF_DIR=.
+. "$SELF_DIR/wbm-lib.sh"
+
+cmd=${1:-status}
+[ $# -gt 0 ] && shift
+
+ensure_installed() {
+  if [ ! -d "$WBM_ROOTFS" ]; then
+    echo "错误：rootfs 不存在（$WBM_ROOTFS）。请先安装模块。" >&2
+    exit 1
+  fi
+  if [ ! -f "$WBM_DATA/app/server/main.py" ]; then
+    echo "错误：管理端代码不存在（$WBM_DATA/app/server/main.py）。请重新安装模块。" >&2
+    exit 1
+  fi
+}
+
+start_service() {
+  ensure_installed
+  wbm_ensure_dirs
+  old=$(wbm_supervisor_pid)
+  if wbm_alive "$old" && wbm_pid_has "$old" 'wbm-supervise'; then
+    echo "已在运行（supervisor pid $old）"
+    return 0
+  fi
+  # 旧监督进程的 PID 可能是复用的；只清它。manager/upstream 若仍在运行，
+  # 新监督进程会接管，不重复拉起。
+  rm -f "$WBM_RUN/supervisor.pid"
+  echo "启动 WorkBuddy Manager…"
+  bb=$(wbm_busybox)
+  if [ -n "$bb" ] && "$bb" setsid true >/dev/null 2>&1; then
+    "$bb" setsid sh "$SELF_DIR/wbm-supervise" >>"$WBM_LOGS/supervisor.log" 2>&1 </dev/null &
+  elif command -v setsid >/dev/null 2>&1; then
+    setsid sh "$SELF_DIR/wbm-supervise" >>"$WBM_LOGS/supervisor.log" 2>&1 </dev/null &
+  else
+    nohup sh "$SELF_DIR/wbm-supervise" >>"$WBM_LOGS/supervisor.log" 2>&1 </dev/null &
+  fi
+  sleep 1
+  pid=$(wbm_supervisor_pid)
+  i=0
+  while ! wbm_alive "$pid" && [ "$i" -lt 10 ]; do
+    i=$((i + 1)); sleep 1; pid=$(wbm_supervisor_pid)
+  done
+  if wbm_alive "$pid"; then
+    echo "已启动（supervisor pid $pid）"
+  else
+    echo "启动失败，查看 $WBM_LOGS/supervisor.log" >&2
+    return 1
+  fi
+}
+
+stop_service() {
+  pid=$(wbm_supervisor_pid)
+  if wbm_alive "$pid" && wbm_pid_has "$pid" 'wbm-supervise'; then
+    echo "停止中…"
+    kill -TERM "$pid" 2>/dev/null
+    i=0
+    while wbm_alive "$pid" && [ "$i" -lt 25 ]; do i=$((i + 1)); sleep 1; done
+    wbm_alive "$pid" && kill -KILL "$pid" 2>/dev/null
+  fi
+
+  # 监督进程被强杀时，兜底结束残留进程并卸载挂载点
+  for f in manager.pid upstream.pid; do
+    p=$(wbm_read_pid "$WBM_RUN/$f")
+    pat='wb2api'
+    [ "$f" = manager.pid ] && pat='start-manager|server\.serve|uvicorn'
+    if wbm_alive "$p" && wbm_pid_has "$p" "$pat"; then kill -TERM "$p" 2>/dev/null; fi
+  done
+  sleep 1
+  for f in manager.pid upstream.pid; do
+    p=$(wbm_read_pid "$WBM_RUN/$f")
+    pat='wb2api'
+    [ "$f" = manager.pid ] && pat='start-manager|server\.serve|uvicorn'
+    if wbm_alive "$p" && wbm_pid_has "$p" "$pat"; then kill -KILL "$p" 2>/dev/null; fi
+    rm -f "$WBM_RUN/$f"
+  done
+  wbm_umount_all
+  rm -f "$WBM_RUN/supervisor.pid" "$WBM_RUN/stopping"
+  echo "已停止"
+}
+
+show_status() {
+  wbm_setup_mounts >/dev/null 2>&1 || true
+  wbm_write_resolv
+  ver=$(cat "$WBM_MODDIR/module.prop" 2>/dev/null | sed -n 's/^version=//p')
+  appver=$(cat "$WBM_DATA/app/.version" 2>/dev/null)
+  sp=$(wbm_supervisor_pid); mp=$(wbm_manager_pid); up=$(wbm_upstream_pid)
+
+  echo "模块版本   : ${ver:-未知}"
+  echo "管理端版本 : ${appver:-未知}"
+  if wbm_alive "$sp"; then echo "监督进程   : 运行中 (pid $sp)"; else echo "监督进程   : 未运行"; fi
+  if wbm_alive "$mp"; then echo "管理端进程 : 运行中 (pid $mp)"; else echo "管理端进程 : 未运行"; fi
+  if wbm_alive "$up"; then echo "上游进程   : 运行中 (pid $up)"; else echo "上游进程   : 未运行"; fi
+
+  echo "健康检查   :"
+  wbm_chroot /opt/wbm/bin/healthcheck 2>/dev/null | sed 's/^/  /'
+
+  hp=$(sed -n 's/^[[:space:]]*WB_MANAGER_HOST[[:space:]]*=[[:space:]]*//p' \
+        "$WBM_DATA/app/.env" 2>/dev/null | tail -n 1 | tr -d '\r')
+  pt=$(sed -n 's/^[[:space:]]*WB_MANAGER_PORT[[:space:]]*=[[:space:]]*//p' \
+        "$WBM_DATA/app/.env" 2>/dev/null | tail -n 1 | tr -d '\r')
+  [ -n "${hp:-}" ] || hp=127.0.0.1
+  [ -n "${pt:-}" ] || pt=7864
+  echo "面板地址   : http://$hp:$pt/"
+  echo "数据目录   : $WBM_DATA"
+}
+
+show_logs() {
+  n=${1:-200}
+  target=${2:-all}
+  case "$target" in
+    supervisor) f="$WBM_LOGS/supervisor.log" ;;
+    manager)    f="$WBM_LOGS/manager.log" ;;
+    setup)      f="$WBM_LOGS/setup.log" ;;
+    upstream)   f="$WBM_DATA/app/upstream/data/server.err.log" ;;
+    out|chat)   f="$WBM_DATA/app/upstream/data/server.out.log" ;;
+    update)     f="$WBM_DATA/data/update.log" ;;
+    all)
+      echo "=== supervisor ==="; tail -n "$n" "$WBM_LOGS/supervisor.log" 2>/dev/null
+      echo "=== manager ===";    tail -n "$n" "$WBM_LOGS/manager.log" 2>/dev/null
+      echo "=== upstream ===";   tail -n "$n" "$WBM_DATA/app/upstream/data/server.err.log" 2>/dev/null
+      echo "=== update ===";     tail -n "$n" "$WBM_DATA/data/update.log" 2>/dev/null
+      return 0
+      ;;
+    *) echo "未知日志：$target（可选 supervisor|manager|setup|upstream|out|update|all）" >&2; return 1 ;;
+  esac
+  tail -n "$n" "$f" 2>/dev/null || echo "日志不存在：$f"
+}
+
+show_password() {
+  pw=$(sed -n 's/^[[:space:]]*WB_ADMIN_PASSWORD[[:space:]]*=[[:space:]]*//p' \
+        "$WBM_DATA/app/.env" 2>/dev/null | tail -n 1 | tr -d '\r')
+  if [ -n "${pw:-}" ]; then
+    echo "初始管理员密码（若已在面板中修改，以面板为准）：$pw"
+  else
+    echo "未在 $WBM_DATA/app/.env 中设置 WB_ADMIN_PASSWORD。"
+    echo "首次启动的密码见 $WBM_LOGS/manager.log（搜索“密码”）。"
+  fi
+}
+
+open_shell() {
+  ensure_installed
+  wbm_setup_mounts || echo "警告：挂载未全部成功" >&2
+  wbm_write_resolv
+  echo "进入 chroot（Alpine / bash）。输入 exit 返回。"
+  if command -v chroot >/dev/null 2>&1; then
+    CR=chroot
+  else
+    CR=$(wbm_busybox)
+    [ -n "$CR" ] || { echo "找不到 chroot" >&2; exit 1; }
+  fi
+  if [ -t 0 ] && [ -t 1 ]; then
+    exec "$CR" "$WBM_ROOTFS" /bin/bash -ic '. /opt/wbm/bin/wbm-env.sh; exec /bin/bash -i'
+  else
+    exec "$CR" "$WBM_ROOTFS" /bin/bash -c '. /opt/wbm/bin/wbm-env.sh; exec /bin/bash'
+  fi
+}
+
+doctor() {
+  wbm_setup_mounts >/dev/null 2>&1 || true
+  wbm_write_resolv
+  echo "== 环境 =="
+  echo "ABI        : $(getprop ro.product.cpu.abi)"
+  echo "Android    : $(getprop ro.build.version.release) (API $(getprop ro.build.version.sdk))"
+  echo "SELinux    : $(getenforce 2>/dev/null)"
+  echo "chroot     : $(command -v chroot || echo '未找到（将尝试 busybox）')"
+  echo "busybox    : $(wbm_busybox)"
+  echo "rootfs     : $WBM_ROOTFS"
+  echo "data       : $WBM_DATA"
+  echo
+
+  echo "== 文件 =="
+  for f in "$WBM_ROOTFS/opt/wbm/bin/wbm-env.sh" \
+           "$WBM_DATA/app/server/main.py" \
+           "$WBM_DATA/app/web/out/index.html" \
+           "$WBM_DATA/app/upstream/wb2api" \
+           "$WBM_DATA/app/.env"; do
+    [ -e "$f" ] && echo "ok   $f" || echo "MISS $f"
+  done
+  echo
+
+  echo "== 挂载 =="
+  for d in proc dev dev/pts sys workbuddy; do
+    if wbm_mounted "$WBM_ROOTFS/$d"; then echo "mounted  $d"; else echo "not     $d"; fi
+  done
+  echo
+
+  echo "== DNS（chroot 内）=="
+  cat "$WBM_ROOTFS/etc/resolv.conf" 2>/dev/null | sed 's/^/  /'
+  echo
+
+  echo "== 磁盘 =="
+  df -h "$WBM_DATA" 2>/dev/null
+  echo
+
+  echo "== 端口 =="
+  pt=$(sed -n 's/^[[:space:]]*WB_MANAGER_PORT[[:space:]]*=[[:space:]]*//p' \
+        "$WBM_DATA/app/.env" 2>/dev/null | tail -n 1 | tr -d '\r')
+  [ -n "${pt:-}" ] || pt=7864
+  wbm_chroot /usr/bin/curl -s -o /dev/null -w 'upstream : %{http_code}\n' --max-time 3 http://127.0.0.1:7863/healthz 2>/dev/null
+  wbm_chroot /usr/bin/curl -s -o /dev/null -w 'manager  : %{http_code}\n' --max-time 3 "http://127.0.0.1:$pt/api/healthz" 2>/dev/null
+}
+
+case "$cmd" in
+  start)   start_service ;;
+  stop)    stop_service ;;
+  restart) stop_service; start_service ;;
+  status)  show_status ;;
+  logs)    show_logs "${1:-200}" "${2:-all}" ;;
+  password|passwd) show_password ;;
+  shell)   open_shell ;;
+  doctor)  doctor ;;
+  rebuild-upstream)
+    ensure_installed
+    wbm_setup_mounts || true
+    wbm_chroot /opt/wbm/bin/rebuild-upstream
+    ;;
+  *)
+    echo "用法：wbm-ctl start|stop|restart|status|logs [n] [target]|password|shell|doctor|rebuild-upstream" >&2
+    exit 1
+    ;;
+esac

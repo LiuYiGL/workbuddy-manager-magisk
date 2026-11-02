@@ -1,0 +1,143 @@
+#!/bin/sh
+# 极简 docker 垫片 —— 让上游自带的管理端/更新器在 Android 上“以为”有 Docker。
+#
+# 为什么这样做：管理端的“更新上游”逻辑（deploy/update.py:rebuild_upstream）
+# 只认 docker compose。与其在每次更新后重新打补丁（更新会覆盖 server/ 和
+# deploy/），不如在运行时提供同名的能力：
+#   docker info                 -> 报告可用（启用面板里的“更新上游”）
+#   docker compose up --build   -> 在设备上用随包 Go 工具链重建并重启上游
+#   docker inspect / logs / cp  -> 映射到本机原生进程与文件
+# 管理端本身以 WB2API_MODE=native 运行，启停走 /opt/wbm/bin/start|stop-upstream，
+# 所以这里只补齐更新器需要的那几条命令。
+set -u
+
+UP=/workbuddy/app/upstream
+RUN=/workbuddy/run
+LOGDIR=$UP/data
+
+fingerprint() {
+  if [ -f "$UP/wb2api" ]; then
+    stat -c '%Y:%s' "$UP/wb2api" 2>/dev/null || echo "0:0"
+  else
+    echo "0:0"
+  fi
+}
+
+tail_logs() {
+  n=200
+  prev=""
+  for a in "$@"; do
+    if [ "$prev" = "--tail" ]; then n=$a; fi
+    prev=$a
+  done
+  tail -n "$n" "$LOGDIR/server.err.log" 2>/dev/null
+  tail -n "$n" "$LOGDIR/server.out.log" 2>/dev/null
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+  info)
+    echo "Containers: 1"
+    echo " Server Version: wbm-native"
+    exit 0
+    ;;
+  version)
+    echo "Docker version 27.0.0-wbm, build native"
+    exit 0
+    ;;
+  compose)
+    action=""
+    for a in "$@"; do
+      case "$a" in
+        up|down|restart|start|stop|logs|ps|version) action=$a; break ;;
+      esac
+    done
+    case "$action" in
+      up)
+        echo "[wbm] docker compose up -> 在设备上重建上游"
+        exec /opt/wbm/bin/rebuild-upstream
+        ;;
+      restart)
+        exec /opt/wbm/bin/restart-upstream
+        ;;
+      start)
+        exec /opt/wbm/bin/start-upstream
+        ;;
+      stop|down)
+        exec /opt/wbm/bin/stop-upstream
+        ;;
+      logs)
+        tail_logs "$@"
+        exit 0
+        ;;
+      ps)
+        echo "NAME                STATUS"
+        pid=$(cat "$RUN/upstream.pid" 2>/dev/null || true)
+        if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+          echo "workbuddy2api       Up (native pid $pid)"
+        else
+          echo "workbuddy2api       Exited"
+        fi
+        exit 0
+        ;;
+      version)
+        echo "Docker Compose version v2.30.0-wbm"
+        exit 0
+        ;;
+      *)
+        exit 0
+        ;;
+    esac
+    ;;
+  inspect)
+    # 只为“重建前后是否换了容器”的判断提供服务：二进制变了指纹就变。
+    fingerprint
+    exit 0
+    ;;
+  logs)
+    tail_logs "$@"
+    exit 0
+    ;;
+  restart)
+    exec /opt/wbm/bin/restart-upstream
+    ;;
+  start)
+    exec /opt/wbm/bin/start-upstream
+    ;;
+  stop)
+    exec /opt/wbm/bin/stop-upstream
+    ;;
+  ps)
+    echo "CONTAINER ID   IMAGE           COMMAND     STATUS       NAMES"
+    pid=$(cat "$RUN/upstream.pid" 2>/dev/null || true)
+    if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "native         wb2api:local    ./wb2api    Up $(fingerprint)   workbuddy2api"
+    fi
+    exit 0
+    ;;
+  cp)
+    # docker cp workbuddy2api:/app/scripts/. <dest>
+    src=${1:-}; dest=${2:-}
+    case "$src" in
+      *:/app/scripts/.)
+        [ -n "$dest" ] && mkdir -p "$dest" && cp -a "$UP/scripts/." "$dest/" && exit 0
+        ;;
+    esac
+    echo "[wbm] docker cp: 不支持该路径（只映射 /app/scripts/）：$src" >&2
+    exit 1
+    ;;
+  exec)
+    # 管理端没有在 native 模式下使用它；保留为成功以免界面误报。
+    exit 0
+    ;;
+  "")
+    echo "Usage: docker [info|compose|inspect|logs|ps|restart|cp] ..." >&2
+    exit 0
+    ;;
+  *)
+    echo "[wbm] docker 垫片：忽略未实现命令 $cmd" >&2
+    exit 0
+    ;;
+esac

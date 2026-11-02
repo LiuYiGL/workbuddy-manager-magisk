@@ -1,0 +1,21 @@
+#!/bin/sh
+# 设备内健康检查（在 chroot 内执行）。退出码 0 = 两个服务都在响应。
+set -u
+. /opt/wbm/bin/wbm-env.sh
+
+port=$(sed -n 's/^[[:space:]]*WB_MANAGER_PORT[[:space:]]*=[[:space:]]*//p' \
+       /workbuddy/app/.env 2>/dev/null | tail -n 1 | sed 's/^"//; s/"$//' | tr -d '\r')
+[ -n "$port" ] || port=7864
+
+ok=0
+if /usr/bin/curl -fsS --max-time 3 http://127.0.0.1:7863/healthz >/dev/null 2>&1; then
+  echo "upstream   : ok"
+else
+  echo "upstream   : FAIL"; ok=1
+fi
+if /usr/bin/curl -fsS --max-time 3 "http://127.0.0.1:$port/api/healthz" >/dev/null 2>&1; then
+  echo "manager    : ok"
+else
+  echo "manager    : FAIL"; ok=1
+fi
+exit "$ok"

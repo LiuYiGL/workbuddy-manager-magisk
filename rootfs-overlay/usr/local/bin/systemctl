@@ -1,0 +1,27 @@
+#!/bin/sh
+# systemctl 垫片：管理端的更新器在非容器环境里用 `systemctl restart <name>`
+# 让新代码生效。Android 没有 systemd，这里改为结束管理端进程；外部监督进程
+# （/data/adb/workbuddy-manager/bin/wbm-supervise）会立即用新代码拉起它。
+set -u
+
+case "${1:-}" in
+  restart|try-restart|reload-or-restart|stop)
+    pid=$(cat /workbuddy/run/manager.pid 2>/dev/null | tr -dc '0-9')
+    if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+      # PID 复用保护：只结束确实是管理端的进程
+      cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+      case "$cmd" in
+        *server.serve*|*server/serve*|*uvicorn*|*start-manager*)
+          kill -TERM "$pid" 2>/dev/null || true
+          ;;
+      esac
+    fi
+    exit 0
+    ;;
+  start|status|is-active|daemon-reload|enable|disable)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac

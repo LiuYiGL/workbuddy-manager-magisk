@@ -1,0 +1,25 @@
+#!/bin/sh
+# 停止上游 workbuddy2api（chroot 内）。PID 文件 + 进程命令行双重校验，
+# 避免在 PID 被复用时误杀其它进程。
+set -u
+
+pidfile=/workbuddy/run/upstream.pid
+[ -f "$pidfile" ] || exit 0
+pid=$(cat "$pidfile" 2>/dev/null || true)
+[ -n "${pid:-}" ] || { rm -f "$pidfile"; exit 0; }
+
+if kill -0 "$pid" 2>/dev/null; then
+  cmdline=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  case "$cmdline" in
+    *wb2api*) ;;
+    *) rm -f "$pidfile"; exit 0 ;;
+  esac
+  kill -TERM "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 15 ]; do
+    i=$((i + 1)); sleep 1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+fi
+rm -f "$pidfile"
+exit 0

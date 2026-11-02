@@ -1,0 +1,137 @@
+#!/system/bin/sh
+# 监督进程：建立 chroot 挂载，然后保证上游与管理端一直活着。
+#
+# 管理端执行“一键更新”后会用 systemctl 垫片结束自己；本进程在下一次循环里
+# 用新代码把它重新拉起。上游同理（重启由 /opt/wbm/bin/stop|start-upstream 完成）。
+set -u
+
+SELF_DIR=${0%/*}
+[ "$SELF_DIR" = "$0" ] && SELF_DIR=.
+. "$SELF_DIR/wbm-lib.sh"
+
+wbm_ensure_dirs
+
+if [ ! -d "$WBM_ROOTFS" ]; then
+  wbm_log "错误：找不到 rootfs（$WBM_ROOTFS）。模块未完整安装？"
+  exit 1
+fi
+
+old=$(wbm_supervisor_pid)
+if wbm_alive "$old" && [ "$old" != "$$" ] && wbm_pid_has "$old" 'wbm-supervise'; then
+  wbm_log "监督进程已在运行（pid $old），退出"
+  exit 0
+fi
+# 只清理监督进程自己的旧 PID；manager/upstream 的 PID 文件保留 —— 若它们
+# 还在运行（上次监督进程被强杀），本进程会直接接管，避免重复拉起。
+rm -f "$WBM_RUN/supervisor.pid"
+
+echo $$ > "$WBM_RUN/supervisor.pid"
+rm -f "$WBM_RUN/stop" "$WBM_RUN/stopping"
+
+stopping=0
+wbm_shutdown() {
+  [ "$stopping" = 1 ] && return 0
+  stopping=1
+  wbm_log "正在停止服务…"
+  : > "$WBM_RUN/stopping" 2>/dev/null
+
+  pid=$(wbm_manager_pid)
+  if wbm_alive "$pid"; then
+    kill -TERM "$pid" 2>/dev/null
+    i=0
+    while wbm_alive "$pid" && [ "$i" -lt 10 ]; do i=$((i + 1)); sleep 1; done
+    wbm_alive "$pid" && kill -KILL "$pid" 2>/dev/null
+  fi
+
+  wbm_chroot /opt/wbm/bin/stop-upstream >/dev/null 2>&1 || true
+
+  patch_pid=$(wbm_upstream_pid)
+  wbm_alive "$patch_pid" && kill -TERM "$patch_pid" 2>/dev/null
+
+  wbm_umount_all
+  rm -f "$WBM_RUN/manager.pid" "$WBM_RUN/upstream.pid" "$WBM_RUN/supervisor.pid" \
+        "$WBM_RUN/stopping"
+  wbm_log "已停止"
+}
+trap 'wbm_shutdown; exit 0' TERM INT HUP
+
+if ! wbm_setup_mounts; then
+  wbm_log "挂载失败，监督进程退出"
+  wbm_umount_all
+  rm -f "$WBM_RUN/supervisor.pid"
+  exit 1
+fi
+wbm_write_resolv
+
+wbm_log "监督进程启动（rootfs=$WBM_ROOTFS）"
+
+start_manager() {
+  wbm_log "启动管理端…"
+  wbm_chroot /opt/wbm/bin/start-manager >>"$WBM_LOGS/manager.log" 2>&1 &
+}
+
+tick=0
+mgr_restarts=0
+up_restarts=0
+last_mgr_restart=0
+last_up_restart=0
+
+while :; do
+  [ -f "$WBM_RUN/stop" ] && break
+
+  now=$(date +%s 2>/dev/null || echo 0)
+
+  mp=$(wbm_manager_pid)
+  if ! wbm_alive "$mp" || ! wbm_pid_has "$mp" 'start-manager|server\.serve|uvicorn'; then
+    # 崩溃风暴保护：60 秒内超过 5 次则放慢到 10 秒
+    if [ "$last_mgr_restart" != 0 ] && [ $((now - last_mgr_restart)) -lt 60 ]; then
+      mgr_restarts=$((mgr_restarts + 1))
+    else
+      mgr_restarts=1
+    fi
+    last_mgr_restart=$now
+    if [ "$mgr_restarts" -gt 5 ]; then
+      wbm_log "管理端反复退出（$mgr_restarts 次），10 秒后重试；查看 $WBM_LOGS/manager.log"
+      sleep 10
+    fi
+    start_manager
+  fi
+
+  up=$(wbm_upstream_pid)
+  if ! wbm_alive "$up" || ! wbm_pid_has "$up" 'wb2api'; then
+    if [ "$last_up_restart" != 0 ] && [ $((now - last_up_restart)) -lt 60 ]; then
+      up_restarts=$((up_restarts + 1))
+    else
+      up_restarts=1
+    fi
+    last_up_restart=$now
+    if [ "$up_restarts" -gt 5 ]; then
+      wbm_log "上游反复退出（$up_restarts 次），10 秒后重试；查看 $WBM_DATA/app/upstream/data/server.err.log"
+      sleep 10
+    fi
+    wbm_log "启动上游…"
+    wbm_chroot /opt/wbm/bin/start-upstream >>"$WBM_LOGS/manager.log" 2>&1 || \
+      wbm_log "上游启动失败"
+  fi
+
+  tick=$((tick + 1))
+  if [ $((tick % 30)) -eq 0 ]; then
+    wbm_write_resolv
+    wbm_rotate "$WBM_LOGS/manager.log" 33554432
+    wbm_rotate "$WBM_DATA/app/upstream/data/server.out.log" 16777216
+    wbm_rotate "$WBM_DATA/app/upstream/data/server.err.log" 16777216
+    wbm_rotate "$WBM_DATA/data/update.log" 16777216
+    wbm_rotate "$WBM_LOGS/supervisor.log" 8388608
+    # 面板每次一键更新都会在 app/ 下留一份 backup-<时间>；只保留最近 3 份，
+    # 避免长期使用把 /data 撑满（旧备份仍可手动保留，这里只删自动生成的）。
+    old_backups=$(ls -1dt "$WBM_DATA/app"/backup-* 2>/dev/null | tail -n +4)
+    if [ -n "$old_backups" ]; then
+      for d in $old_backups; do rm -rf "$d" 2>/dev/null; done
+    fi
+  fi
+
+  sleep 2
+done
+
+wbm_shutdown
+exit 0

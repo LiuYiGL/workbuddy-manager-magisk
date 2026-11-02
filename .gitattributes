@@ -1,0 +1,22 @@
+# Android/Magisk 脚本必须是 LF；Windows 上也不要让 autocrlf 改成 CRLF。
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.prop text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+customize.sh text eol=lf
+service.sh text eol=lf
+uninstall.sh text eol=lf
+bin/* text eol=lf
+rootfs-overlay/** text eol=lf
+tools/* text eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.tar.gz binary
+*.gz binary

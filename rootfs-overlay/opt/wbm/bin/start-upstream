@@ -1,0 +1,39 @@
+#!/bin/sh
+# 启动上游 workbuddy2api（chroot 内）。
+# 约定（管理端 native 模式要求）：脚本必须立即返回，日志写入 data/server.*.log。
+set -u
+
+. /opt/wbm/bin/wbm-env.sh
+
+cd /workbuddy/app/upstream || exit 1
+mkdir -p auths data /workbuddy/run
+
+pidfile=/workbuddy/run/upstream.pid
+if [ -f "$pidfile" ]; then
+  pid=$(cat "$pidfile" 2>/dev/null || true)
+  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null \
+     && tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q wb2api; then
+    exit 0
+  fi
+fi
+
+if [ ! -x ./wb2api ]; then
+  marker=/workbuddy/run/upstream-build-failed
+  if [ -f "$marker" ]; then
+    now=$(date +%s 2>/dev/null || echo 0)
+    mt=$(stat -c %Y "$marker" 2>/dev/null || echo 0)
+    if [ "$now" -gt 0 ] && [ $((now - mt)) -lt 600 ]; then
+      echo "[wbm] 最近一次上游重建失败，10 分钟内不重试；查看 $marker 与日志" >&2
+      exit 1
+    fi
+  fi
+  echo "[wbm] 上游二进制 wb2api 不存在，先执行重建…" >&2
+  /opt/wbm/bin/rebuild-upstream || exit 1
+  exit 0
+fi
+
+# 业务日志走 stderr、请求日志走 stdout —— 上游的分流约定，管理端按两个文件读取。
+nohup ./wb2api -config ./config.json >>data/server.out.log 2>>data/server.err.log &
+pid=$!
+echo "$pid" > "$pidfile"
+exit 0

@@ -1,0 +1,12 @@
+# build artifacts
+/build/
+/dist/
+/.cache/
+*.zip
+*.tar.gz
+
+# editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

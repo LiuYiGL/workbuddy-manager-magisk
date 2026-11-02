@@ -1,0 +1,38 @@
+#!/bin/sh
+# 在 chroot 内前台启动管理端（uvicorn）。
+# 由外部监督进程通过 `chroot ... /opt/wbm/bin/start-manager` 拉起；
+# 本脚本最后 exec，故 /workbuddy/run/manager.pid 就是 Python 进程的 PID。
+set -u
+
+. /opt/wbm/bin/wbm-env.sh
+
+cd /workbuddy/app || exit 1
+
+# 只从 .env 读取监听地址（不 source 它，避免执行配置文件里的任意 shell）。
+read_env() {
+  key="$1"
+  [ -f .env ] || return 0
+  sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" .env 2>/dev/null \
+    | tail -n 1 \
+    | sed 's/^"//; s/"$//; s/^'\''//; s/'\''$//' \
+    | tr -d '\r'
+}
+host=$(read_env WB_MANAGER_HOST)
+port=$(read_env WB_MANAGER_PORT)
+[ -n "$host" ] || host=127.0.0.1
+[ -n "$port" ] || port=7864
+
+mkdir -p /workbuddy/run /workbuddy/logs
+echo $$ > /workbuddy/run/manager.pid
+
+# 依赖缺失时先从模块自带的 wheelhouse 离线安装一次。
+# 正常情况下 customize.sh 已完成安装；这里兜底（rootfs 被替换、或首次启动）。
+if ! python3 -c 'import fastapi, uvicorn, httpx, pydantic, starlette, multipart, socksio, dotenv' >/dev/null 2>&1; then
+  echo "[wbm] python 依赖缺失，尝试离线安装…"
+  python3 -m pip install -q --break-system-packages --no-index \
+      --find-links /opt/wbm/wheels -r server/requirements.txt \
+      >>/workbuddy/logs/setup.log 2>&1 \
+    || echo "[wbm] 离线安装失败，详见 /workbuddy/logs/setup.log" >&2
+fi
+
+exec python3 -m server.serve --host "$host" --port "$port" --env-file .env

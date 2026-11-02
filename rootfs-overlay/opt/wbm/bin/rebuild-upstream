@@ -1,0 +1,71 @@
+#!/bin/sh
+# 在设备上从随包的 Go 源码重建上游二进制。
+#
+# 为什么需要它：管理端自带的更新器（deploy/update.py）在“更新上游”时会执行
+#   docker compose up -d --build --force-recreate
+# 本模块用 /usr/local/bin/docker 垫片把这条命令映射到这里；否则 Android 上
+# 没有 Docker，上游源码更新后只会停留在源码层，跑的还是旧二进制。
+#
+# 构建策略：先全部构建到 *.new，全部成功后再停旧进程并替换；任何一步失败
+# 都不会破坏正在运行的上游。
+set -u
+
+. /opt/wbm/bin/wbm-env.sh
+
+cd /workbuddy/app/upstream || { echo "[wbm] 上游目录不存在" >&2; exit 1; }
+
+GO=/opt/go/bin/go
+[ -x "$GO" ] || GO=$(command -v go 2>/dev/null || true)
+if [ -z "${GO:-}" ] || [ ! -x "$GO" ]; then
+  echo "[wbm] 找不到 Go 工具链（/opt/go/bin/go）。无法在设备上重建上游。" >&2
+  echo "[wbm] 请升级本 Magisk 模块，或在有 Go 的机器上重新构建模块包。" >&2
+  date +%s > /workbuddy/run/upstream-build-failed 2>/dev/null || true
+  exit 1
+fi
+
+echo "[wbm] 使用 $($GO version 2>/dev/null || echo "go (unknown)")"
+echo "[wbm] 开始构建上游（CGO_ENABLED=0，-p 2）…"
+
+# name:cmd 列表与上游 Dockerfile 保持一致。
+# wb2api 必需；其余工具缺失时只告警（未来上游若删掉某个命令仍能升级）。
+for spec in \
+  "wb2api ./cmd/server" \
+  "signin_bin ./cmd/signin" \
+  "login ./cmd/login" \
+  "credit ./cmd/credit" \
+  "trial_bin ./cmd/trial" \
+  "activity_bin ./cmd/activity"; do
+  name=${spec%% *}
+  pkg=${spec#* }
+  if [ ! -d "$pkg" ]; then
+    if [ "$name" = wb2api ]; then
+      echo "[wbm] 缺少上游主程序目录 $pkg" >&2
+      date +%s > /workbuddy/run/upstream-build-failed 2>/dev/null || true
+      exit 1
+    fi
+    echo "[wbm] 跳过不存在的命令 $pkg"
+    continue
+  fi
+  echo "[wbm]   build $name"
+  if ! "$GO" build -trimpath -p 2 -ldflags="-s -w" -o "$name.new" "$pkg"; then
+    echo "[wbm] 构建 $name 失败，保留当前运行的版本" >&2
+    rm -f ./*.new
+    date +%s > /workbuddy/run/upstream-build-failed 2>/dev/null || true
+    exit 1
+  fi
+done
+
+# 全部成功：先原子替换文件，再停旧进程、启动新进程。
+# 顺序很重要：若先 stop 再替换，监督进程可能在这条缝里把**旧二进制**拉起来，
+# 而 rebuild 的 start-upstream 看到已有进程就退出，结果“更新成功”但跑的是旧版。
+for f in ./*.new; do
+  [ -e "$f" ] || continue
+  mv -f "$f" "${f%.new}"
+done
+chmod 755 ./wb2api ./signin_bin ./login ./credit ./trial_bin ./activity_bin 2>/dev/null || true
+rm -f /workbuddy/run/upstream-build-failed 2>/dev/null || true
+
+/opt/wbm/bin/stop-upstream
+
+echo "[wbm] 上游重建完成"
+exec /opt/wbm/bin/start-upstream

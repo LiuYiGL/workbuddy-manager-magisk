@@ -1,0 +1,5 @@
+#!/bin/sh
+# 重启上游：管理端在 native 模式下会先调 stop 再调 start，这里给手工运维一个入口。
+set -u
+/opt/wbm/bin/stop-upstream
+exec /opt/wbm/bin/start-upstream
