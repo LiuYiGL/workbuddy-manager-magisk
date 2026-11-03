@@ -104,7 +104,8 @@ chroot 内看到的持久化目录是 `/workbuddy`（bind mount）。
 ## 三、安装
 
 1. 从本仓库的 **Actions → Build WorkBuddy Manager Android module** 下载最新
-   artifact（或 Releases 里的 zip）：`WorkBuddyManager-vX.Y.Z-arm64.zip`。
+   artifact（或 Releases 里的 zip）：`WorkBuddyManager-<tag>-arm64.zip`
+   （例如 `WorkBuddyManager-v2.11.9-android.1-arm64.zip`）。
 2. Magisk 应用 → 模块 → 从本地安装；KernelSU 同理。
 3. **安装过程不需要联网**。rootfs 解压约 350–450 MB；加上安装临时文件与 Python 依赖，请预留 **1 GB 以上**可用空间。
 4. 安装完成后重启设备（或执行 `sh /data/adb/workbuddy-manager/bin/wbm-ctl start`）。
@@ -230,7 +231,8 @@ sh /data/adb/workbuddy-manager/bin/wbm-ctl restart
 - 每周一自动构建最新 Release；
 - 打 `v*` tag 时额外把 zip 附到本仓库的 Release。
 
-产物：`WorkBuddyManager-vX.Y.Z-arm64.zip`。
+产物：`WorkBuddyManager-<module-tag>-arm64.zip`。tag 构建使用 tag 名
+（如 `v2.11.9-android.1`）；本地构建默认使用上游版本（如 `v2.11.9`）。
 
 ### 本地构建
 

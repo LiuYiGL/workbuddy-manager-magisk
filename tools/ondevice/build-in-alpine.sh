@@ -63,6 +63,8 @@ SRC=$(ls -d "$WORK/src"/workbuddy-manager-* 2>/dev/null | head -n 1)
 
 TAG=$(tr -d '\r\n' < "$SRC/.version")
 APP_VERSION=${TAG#v}
+# 产物文件名可用 WBM_MODULE_TAG 指定（如 v2.11.9-android.1）；默认跟上游版本。
+MODULE_TAG=${WBM_MODULE_TAG:-$TAG}
 [ -n "$APP_VERSION" ] || APP_VERSION=$(sed -n "s/.*version='\([^']*\)'.*/\1/p" "$SRC/server/main.py" | head -n 1)
 
 PAYLOAD="$WORK/module/payload/app"
@@ -169,6 +171,7 @@ chmod -R 755 "$WORK/target/opt/wbm/bin" \
 
 {
   echo "app_version=$APP_VERSION"
+  echo "module_tag=$MODULE_TAG"
   echo "alpine=3.22.7"
   echo "go=$GO_VERSION"
   echo "built_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -201,7 +204,7 @@ chmod 644 "$WORK/module/module.prop" \
           "$WORK/module/META-INF/com/google/android/updater-script"
 
 log "生成 zip"
-OUT="$WORK/dist/WorkBuddyManager-${TAG}-arm64.zip"
+OUT="$WORK/dist/WorkBuddyManager-${MODULE_TAG}-arm64.zip"
 rm -f "$OUT"
 ( cd "$WORK/module" && zip -qrX -9 "$OUT" . )
 ls -lh "$OUT"

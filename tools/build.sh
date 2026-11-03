@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 构建可直接刷入 Magisk / KernelSU 的 arm64 模块 zip。
 #
-# 产物：dist/WorkBuddyManager-<app-version>-arm64.zip
+# 产物：dist/WorkBuddyManager-<module-tag>-arm64.zip
+# 从 tag 构建时 module-tag 取 GITHUB_REF（如 v2.11.9-android.1）；
+# 本地构建默认用上游版本 v2.11.9。
 #
 # 依赖：
 #   · curl / tar / gzip / zip
@@ -64,6 +66,14 @@ if [ -z "$APP_VERSION" ]; then
 fi
 [ -n "$APP_VERSION" ] || { echo "无法确定上游版本；用 WB_VERSION=2.x.y 指定，或检查网络/GitHub API 限额" >&2; exit 1; }
 TAG="v${APP_VERSION#v}"
+# 产物文件名优先使用模块 tag；本地无 GITHUB_REF 时回退到上游版本。
+MODULE_TAG=${WBM_MODULE_TAG:-}
+if [ -z "$MODULE_TAG" ] && [ -n "${GITHUB_REF:-}" ]; then
+  case "$GITHUB_REF" in
+    refs/tags/*) MODULE_TAG=${GITHUB_REF#refs/tags/} ;;
+  esac
+fi
+[ -n "$MODULE_TAG" ] || MODULE_TAG="$TAG"
 APP_VERSION=${TAG#v}
 
 PKG="$CACHE/releases/workbuddy-manager-$TAG.tar.gz"
@@ -193,6 +203,7 @@ sed -i "s/@APP_VERSION@/${APP_VERSION}/; s/@APP_VERSION_CODE@/${VERSION_CODE}/" 
 
 {
   echo "app_version=${APP_VERSION}"
+  echo "module_tag=${MODULE_TAG}"
   echo "alpine=${ALPINE_VERSION}"
   echo "go=${GO_VERSION}"
   echo "built_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -204,7 +215,7 @@ chmod 755 "$MOD/customize.sh" "$MOD/service.sh" "$MOD/uninstall.sh" "$MOD/action
 chmod 644 "$MOD/module.prop" "$MOD/META-INF/com/google/android/updater-script"
 
 # ── 6. 打包（保留 Unix 权限位）──────────────────────────
-OUT="$DIST/WorkBuddyManager-${TAG}-arm64.zip"
+OUT="$DIST/WorkBuddyManager-${MODULE_TAG}-arm64.zip"
 rm -f "$OUT"
 ( cd "$MOD" && zip -qrX -9 "$OUT" . )
 echo
