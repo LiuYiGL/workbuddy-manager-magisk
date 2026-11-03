@@ -82,9 +82,15 @@ if [ -d "$OLD_ROOTFS" ]; then
   _save_rootfs=$WBM_ROOTFS
   WBM_ROOTFS=$OLD_ROOTFS
   wbm_umount_all
+  # KernelSU 的安装器可能继承旧服务的 mount namespace：普通 umount 会因仍有
+  # 引用而失败。lazy unmount 先 detach，随后替换模块目录时就不会穿过挂载点
+  # （/workbuddy 指向 /data/adb/workbuddy-manager，必须保护）。
+  for _m in workbuddy sys dev/pts dev proc; do
+    umount -l "$OLD_ROOTFS/$_m" 2>/dev/null || true
+  done
   WBM_ROOTFS=$_save_rootfs
   if grep -q " $OLD_ROOTFS/" /proc/mounts 2>/dev/null; then
-    abort "旧运行时仍处于挂载状态，请重启设备后再安装模块"
+    ui_print "! 旧运行时仍有挂载残留，已尝试 lazy unmount，继续安装"
   fi
 fi
 

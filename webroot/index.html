@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>WorkBuddy Manager</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f5fa;
+    --fg: #172033;
+    --muted: #64748b;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --primary: #2563eb;
+    --primary-fg: #ffffff;
+    --danger: #dc2626;
+    --ok: #16a34a;
+    --warn: #f59e0b;
+    --shadow: 0 8px 30px rgba(15, 23, 42, .08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220;
+      --fg: #e5edf9;
+      --muted: #93a4bd;
+      --card: #131d31;
+      --line: #22304a;
+      --primary: #3b82f6;
+      --primary-fg: #ffffff;
+      --danger: #f87171;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --shadow: 0 8px 30px rgba(0, 0, 0, .35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    padding: calc(18px + env(safe-area-inset-top)) 16px calc(22px + env(safe-area-inset-bottom));
+  }
+  .wrap { max-width: 620px; margin: 0 auto; }
+  .hero { display: flex; align-items: center; gap: 14px; margin: 4px 2px 20px; }
+  .logo {
+    width: 48px; height: 48px; border-radius: 14px;
+    display: grid; place-items: center;
+    font-weight: 800; font-size: 17px; letter-spacing: .5px;
+    color: #fff; background: linear-gradient(135deg, #2563eb, #7c3aed);
+    box-shadow: var(--shadow);
+  }
+  h1 { font-size: 21px; margin: 0; letter-spacing: .2px; }
+  .sub { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; box-shadow: var(--shadow);
+    padding: 16px; margin-bottom: 14px;
+  }
+  .status-row { display: flex; align-items: center; gap: 10px; }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted); flex: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 16%, transparent);
+  }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
+  .dot.off { background: var(--danger); box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 16%, transparent); }
+  .dot.wait { background: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 18%, transparent); }
+  #statusText { font-weight: 600; font-size: 15px; }
+  .meta { margin-top: 10px; color: var(--muted); font-size: 12.5px; word-break: break-all; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+    padding: 2px 6px; border-radius: 7px; font-size: 12px;
+  }
+  .actions { display: grid; gap: 10px; margin-bottom: 14px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  button {
+    appearance: none; border: 1px solid var(--line); border-radius: 13px;
+    padding: 13px 14px; font-size: 14.5px; font-weight: 600;
+    color: var(--fg); background: var(--card); cursor: pointer;
+    transition: transform .06s ease, opacity .15s ease, background .15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:active { transform: scale(.985); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
+  button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+  button.ghost {
+    padding: 6px 11px; font-size: 12.5px; font-weight: 600;
+    border-radius: 10px; color: var(--muted); background: transparent;
+    margin-left: auto;
+  }
+  .log-card { padding: 0; overflow: hidden; }
+  .log-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-weight: 600; color: var(--muted);
+  }
+  pre#log {
+    margin: 0; padding: 12px 16px 16px; min-height: 88px; max-height: 280px;
+    overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px; line-height: 1.55; color: var(--muted);
+  }
+  pre#log .err { color: var(--danger); }
+  .note { color: var(--muted); font-size: 12px; text-align: center; padding: 2px 10px; }
+  .note.warn { color: var(--warn); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="hero">
+    <div class="logo">WB</div>
+    <div>
+      <h1>WorkBuddy Manager</h1>
+      <p class="sub">Android · KernelSU WebUI</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="status-row">
+      <span id="dot" class="dot wait"></span>
+      <span id="statusText">正在检测服务…</span>
+      <button id="refresh" class="ghost" type="button">刷新</button>
+    </div>
+    <div class="meta">面板地址：<code id="panelUrl">http://127.0.0.1:7864/</code></div>
+  </section>
+
+  <section class="actions">
+    <button id="openWebView" class="primary" type="button">在 WebUI 内打开面板</button>
+    <button id="openBrowser" type="button">用浏览器打开面板</button>
+    <div class="row">
+      <button id="start" type="button">启动服务</button>
+      <button id="restart" type="button">重启服务</button>
+      <button id="stop" class="danger" type="button">停止服务</button>
+    </div>
+  </section>
+
+  <section class="card log-card">
+    <div class="log-head">
+      <span>操作日志</span>
+      <button id="clear" class="ghost" type="button">清空</button>
+    </div>
+    <pre id="log"></pre>
+  </section>
+
+  <footer id="bridgeNote" class="note"></footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var DATA = '/data/adb/workbuddy-manager';
+  var CTL = DATA + '/bin/wbm-ctl';
+  var port = '7864';
+  var busy = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $('log');
+  var dotEl = $('dot');
+  var statusEl = $('statusText');
+  var panelEl = $('panelUrl');
+  var noteEl = $('bridgeNote');
+
+  function panelUrl() { return 'http://127.0.0.1:' + port + '/'; }
+
+  function log(text, cls) {
+    if (!text) return;
+    var line = document.createElement('span');
+    if (cls) line.className = cls;
+    line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text + '\n';
+    logEl.appendChild(line);
+    while (logEl.childNodes.length > 200) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function toast(msg) {
+    try {
+      if (window.ksu && typeof window.ksu.toast === 'function') {
+        window.ksu.toast(String(msg));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // KernelSU WebUI bridge: ksu.exec(command, optionsJson, callbackName)
+  function ksuExec(command, options, timeoutMs) {
+    options = options || {};
+    timeoutMs = timeoutMs || 30000;
+    return new Promise(function (resolve) {
+      if (!window.ksu || typeof window.ksu.exec !== 'function') {
+        resolve({ errno: -1, stdout: '', stderr: 'KSU WebUI 桥不可用' });
+        return;
+      }
+      var name = 'wbm_exec_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+      var done = false;
+      var timer = setTimeout(function () {
+        finish(-1, '', '命令超时：' + command);
+      }, timeoutMs);
+
+      function finish(errno, stdout, stderr) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { delete window[name]; } catch (e) { /* ignore */ }
+        resolve({
+          errno: Number(errno) || 0,
+          stdout: stdout || '',
+          stderr: stderr || ''
+        });
+      }
+
+      window[name] = finish;
+      try {
+        window.ksu.exec(command, JSON.stringify(options), name);
+      } catch (e) {
+        finish(-1, '', String(e));
+      }
+    });
+  }
+
+  async function run(command, timeoutMs) {
+    log('$ ' + command);
+    var r = await ksuExec(command, {}, timeoutMs);
+    if (r.stdout) log(r.stdout.trim());
+    if (r.stderr) log(r.stderr.trim(), 'err');
+    if (r.errno) log('退出码 ' + r.errno, 'err');
+    return r;
+  }
+
+  async function loadPort() {
+    var r = await ksuExec(
+      "sed -n 's/^[[:space:]]*WB_MANAGER_PORT[[:space:]]*=[[:space:]]*//p' " +
+      DATA + "/app/.env | tail -n 1", {}, 8000);
+    var p = (r.stdout || '').replace(/\s+/g, '');
+    if (/^\d+$/.test(p)) port = p;
+    panelEl.textContent = panelUrl();
+  }
+
+  async function healthCode() {
+    var r = await ksuExec(
+      "/system/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 2 " +
+      '"' + panelUrl() + 'api/healthz"', {}, 8000);
+    return (r.stdout || '').trim();
+  }
+
+  function setStatus(state, text) {
+    dotEl.className = 'dot ' + state;
+    statusEl.textContent = text;
+  }
+
+  async function refresh() {
+    try {
+      await loadPort();
+      var code = await healthCode();
+      if (code === '200') {
+        setStatus('on', '服务运行中');
+      } else if (code === '000' || code === '') {
+        setStatus('off', '服务未运行');
+      } else {
+        setStatus('wait', '服务已启动（HTTP ' + code + '）');
+      }
+    } catch (e) {
+      setStatus('off', '状态检测失败');
+      log(String(e), 'err');
+    }
+  }
+
+  async function ensureRunning() {
+    await loadPort();
+    var code = await healthCode();
+    if (code === '200') return true;
+
+    setStatus('wait', '正在启动服务…');
+    setBusy(true);
+    try {
+      await run('sh ' + CTL + ' start', 30000);
+      for (var i = 0; i < 20; i++) {
+        await new Promise(function (r) { setTimeout(r, 1000); });
+        if (await healthCode() === '200') {
+          setStatus('on', '服务运行中');
+          return true;
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+    log('服务未在预期时间内就绪', 'err');
+    return false;
+  }
+
+  function setBusy(v) {
+    busy = v;
+    ['openWebView', 'openBrowser', 'start', 'restart', 'stop', 'refresh']
+      .forEach(function (id) { $(id).disabled = v; });
+  }
+
+  async function openInWebView() {
+    if (!(await ensureRunning())) return;
+    log('在 WebUI 内打开：' + panelUrl());
+    window.location.href = panelUrl();
+  }
+
+  async function openBrowser() {
+    if (!(await ensureRunning())) return;
+    var url = panelUrl();
+    log('用浏览器打开：' + url);
+    var r = await run('/system/bin/am start --user 0 -a android.intent.action.VIEW -d "' + url + '"', 15000);
+    if (r.errno !== 0) {
+      toast('无法打开浏览器');
+      log('如果系统拒绝启动 Activity，请手动访问上面的地址', 'err');
+    }
+  }
+
+  async function startService() {
+    setBusy(true);
+    try {
+      await run('sh ' + CTL + ' start', 30000);
+      await refresh();
+    } finally { setBusy(false); }
+  }
+
+  async function stopService() {
+    if (!confirm('确定停止 WorkBuddy Manager 服务？')) return;
+    setBusy(true);
+    try {
+      await run('sh ' + CTL + ' stop', 45000);
+      await refresh();
+    } finally { setBusy(false); }
+  }
+
+  async function restartService() {
+    if (!confirm('确定重启 WorkBuddy Manager 服务？')) return;
+    setBusy(true);
+    try {
+      await run('sh ' + CTL + ' restart', 60000);
+      await refresh();
+    } finally { setBusy(false); }
+  }
+
+  $('openWebView').addEventListener('click', function () { openInWebView(); });
+  $('openBrowser').addEventListener('click', function () { openBrowser(); });
+  $('start').addEventListener('click', function () { startService(); });
+  $('stop').addEventListener('click', function () { stopService(); });
+  $('restart').addEventListener('click', function () { restartService(); });
+  $('refresh').addEventListener('click', function () { refresh(); });
+  $('clear').addEventListener('click', function () { logEl.textContent = ''; });
+
+  document.addEventListener('DOMContentLoaded', async function () {
+    if (window.ksu && typeof window.ksu.exec === 'function') {
+      noteEl.textContent = 'KernelSU WebUI 已连接';
+      await refresh();
+    } else {
+      noteEl.textContent = '未检测到 KernelSU WebUI 桥，请从 KernelSU 管理器的模块页打开本页面。';
+      noteEl.classList.add('warn');
+      setStatus('off', '非 KernelSU WebUI 环境');
+    }
+  });
+})();
+</script>
+</body>
+</html>
