@@ -183,7 +183,7 @@ echo "rootfs 大小：$(du -h "$ROOTFS_TGZ" | cut -f1)"
 # ── 5. 组装模块目录 ─────────────────────────────────────
 echo "== 组装模块 =="
 cp -f "$ROOT/module.prop" "$MOD/module.prop"
-cp -f "$ROOT/customize.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" "$MOD/"
+cp -f "$ROOT/customize.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" "$ROOT/action.sh" "$MOD/"
 cp -f "$ROOT/META-INF/com/google/android/update-binary" "$MOD/META-INF/com/google/android/"
 cp -f "$ROOT/META-INF/com/google/android/updater-script" "$MOD/META-INF/com/google/android/"
 cp -a "$ROOT/bin/." "$MOD/bin/"
@@ -199,7 +199,7 @@ sed -i "s/@APP_VERSION@/${APP_VERSION}/; s/@APP_VERSION_CODE@/${VERSION_CODE}/" 
   echo "upstream_id=$(cat "$PAYLOAD/upstream/.upstream-id" 2>/dev/null || echo unknown)"
 } > "$MOD/build-info.txt"
 
-chmod 755 "$MOD/customize.sh" "$MOD/service.sh" "$MOD/uninstall.sh" \
+chmod 755 "$MOD/customize.sh" "$MOD/service.sh" "$MOD/uninstall.sh" "$MOD/action.sh" \
           "$MOD/bin/"* "$MOD/META-INF/com/google/android/update-binary"
 chmod 644 "$MOD/module.prop" "$MOD/META-INF/com/google/android/updater-script"
 

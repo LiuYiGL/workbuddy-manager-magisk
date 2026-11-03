@@ -114,6 +114,17 @@ chroot 内看到的持久化目录是 `/workbuddy`（bind mount）。
    cat /data/adb/workbuddy-manager/webui.txt
    ```
 
+### 模块页「操作」按钮
+
+Magisk / KernelSU 的模块列表里，本模块会显示「操作」按钮（模块根目录的
+`action.sh`）。点击后会：
+
+1. 启动或确认服务正在运行；
+2. 等待面板就绪；
+3. 尝试在浏览器打开 `http://127.0.0.1:7864/`（端口读取 `.env`）。
+
+如果 ROM 拒绝 root 启动 Activity，操作页会输出面板地址，手动打开即可。
+
 > 以下命令都需要 root（`adb shell` 后执行 `su`，或在 KernelSU/Magisk 的
 > root shell 中运行）。
 
@@ -323,6 +334,7 @@ bash tools/check.sh
 module.prop                  模块元数据（版本由构建脚本替换）
 customize.sh                 离线安装：解压 rootfs、装代码、装依赖
 service.sh                   开机启动监督进程
+action.sh                    Magisk/KernelSU 模块页「操作」按钮：启动服务并打开面板
 uninstall.sh                 停止服务、卸载挂载（保留数据）
 bin/
   wbm-lib.sh                 宿主机侧公共函数

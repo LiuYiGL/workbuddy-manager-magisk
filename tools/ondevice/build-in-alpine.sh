@@ -182,7 +182,7 @@ ls -lh "$WORK/module/assets/rootfs-arm64.tar.gz"
 # ── 7. 组装模块 ────────────────────────────────────────
 log "组装模块目录"
 cp -f "$REPO/module.prop" "$WORK/module/module.prop"
-cp -f "$REPO/customize.sh" "$REPO/service.sh" "$REPO/uninstall.sh" "$WORK/module/"
+cp -f "$REPO/customize.sh" "$REPO/service.sh" "$REPO/uninstall.sh" "$REPO/action.sh" "$WORK/module/"
 cp -a "$REPO/bin/." "$WORK/module/bin/"
 mkdir -p "$WORK/module/META-INF/com/google/android"
 cp -f "$REPO/META-INF/com/google/android/update-binary" \
@@ -195,7 +195,7 @@ sed -i "s/@APP_VERSION@/${APP_VERSION}/; s/@APP_VERSION_CODE@/${VERSION_CODE}/" 
   "$WORK/module/module.prop"
 
 chmod 755 "$WORK/module/customize.sh" "$WORK/module/service.sh" \
-          "$WORK/module/uninstall.sh" "$WORK/module/bin/"* \
+          "$WORK/module/uninstall.sh" "$WORK/module/action.sh" "$WORK/module/bin/"* \
           "$WORK/module/META-INF/com/google/android/update-binary"
 chmod 644 "$WORK/module/module.prop" \
           "$WORK/module/META-INF/com/google/android/updater-script"

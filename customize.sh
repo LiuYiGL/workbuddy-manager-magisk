@@ -333,13 +333,24 @@ fi
 
 # 安装完成后尝试打开公告页（仅安装时一次；部分 ROM 会拒绝 root 启动 Activity，
 # 失败不阻断安装，并在日志里打印链接作为兜底）。
-ui_print "- 打开：https://uplcm.com/4/12176814"
+# 先解析短链的重定向目标；离线/解析失败则直接打开短链，让浏览器自行重定向。
+ANNOUNCE_SHORT="https://dwz.liuyi.publicvm.com/workbuddy-manager"
+ANNOUNCE_URL=""
+if [ -x /system/bin/curl ]; then
+  ANNOUNCE_URL=$(/system/bin/curl -sSL -o /dev/null -w '%{url_effective}' \
+    --connect-timeout 5 --max-time 10 "$ANNOUNCE_SHORT" 2>/dev/null)
+fi
+case "$ANNOUNCE_URL" in
+  http://*|https://*) ;;
+  *) ANNOUNCE_URL="$ANNOUNCE_SHORT" ;;
+esac
+ui_print "- 打开：$ANNOUNCE_URL"
 if [ -x /system/bin/am ]; then
   /system/bin/am start --user 0 -a android.intent.action.VIEW \
-    -d "https://uplcm.com/4/12176814" >/dev/null 2>&1 \
+    -d "$ANNOUNCE_URL" >/dev/null 2>&1 \
   || /system/bin/am start -a android.intent.action.VIEW \
-    -d "https://uplcm.com/4/12176814" >/dev/null 2>&1 \
-  || ui_print "! 无法自动打开浏览器，请手动访问：https://uplcm.com/4/12176814"
+    -d "$ANNOUNCE_URL" >/dev/null 2>&1 \
+  || ui_print "! 无法自动打开浏览器，请手动访问：$ANNOUNCE_URL"
 else
-  ui_print "! 未找到 am 命令，请手动访问：https://uplcm.com/4/12176814"
+  ui_print "! 未找到 am 命令，请手动访问：$ANNOUNCE_URL"
 fi
